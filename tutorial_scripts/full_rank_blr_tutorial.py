@@ -4,7 +4,7 @@ import matplotlib as mpl
 import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
-import _lazymaps.lazymaps as lm
+import lazymaps as lm
 from sklearn import preprocessing
 
 
@@ -18,7 +18,7 @@ tf_double = tf.float64
 
 
 # import data
-train = pd.read_csv("pd_speech_features.csv")
+train = pd.read_csv("paper_examples/pd_speech_features.csv")
 
 # set up data set
 
@@ -74,13 +74,13 @@ def unnormalized_log_prob(samples):
 
 # IAF hyper-parameters
 num_stages = 4
-width = 128
+width = 200 #128
 depth = 2
 
 
 # training hyper-parameters
 sample_size = 100
-num_iters = 20000
+num_iters = 500 #20000
 optimizer = tf.optimizers.Adam(1e-3)
 
 # example to run

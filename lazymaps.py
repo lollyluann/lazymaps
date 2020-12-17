@@ -173,6 +173,8 @@ def make_rotation_bij(U):
 def make_iaf_bij(dim, num_stages, width, depth):
     """forms a trainable iaf bijector [x -> iaf(x)]"""
     bijectors = []
+    perm = [i for i in range(dim)]
+    perm = perm[::-1]
     for i in range(num_stages):
         made = tfb.AutoregressiveNetwork(params=2,
                                          hidden_units=list(np.repeat(width, depth)),
@@ -184,8 +186,6 @@ def make_iaf_bij(dim, num_stages, width, depth):
             shift_and_log_scale_fn=made)))
 
         # Permute layer
-        perm = [i for i in range(dim)]
-        perm = perm[::-1]
         bijectors.append(tfb.Permute(permutation=perm))
 
     iaf_bij = tfb.Chain(list(reversed(bijectors)))

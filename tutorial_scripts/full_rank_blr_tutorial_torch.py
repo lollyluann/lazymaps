@@ -15,6 +15,12 @@ pyd = torch.distributions
 pyrod = pyro.distributions
 type_double = torch.float64
 
+'''if torch.cuda.is_available():
+  dev = "cuda:0"
+else:
+  dev = "cpu"
+device = torch.device(dev)'''
+
 
 # import data
 train = pd.read_csv("paper_examples/pd_speech_features.csv")
@@ -22,14 +28,14 @@ train = pd.read_csv("paper_examples/pd_speech_features.csv")
 # set up data set
 
 # Using first 500 feautures
-all_x = train.values[1:, 1:501].astype(np.float64)
+all_x = train.values[1:, 1:501].astype(np.float32)
 all_x = preprocessing.scale(all_x)
-all_y = train.values[1:, -1].astype(np.float64)
+all_y = train.values[1:, -1].astype(np.float32)
 
 # 605 = 80% of observations
 num_pats = 605
 y_train = all_y[:num_pats]
-x_train = torch.tensor(all_x[:num_pats,:]).double()
+x_train = torch.tensor(all_x[:num_pats,:]).float()
 
 
 # get data dimensions
@@ -37,8 +43,8 @@ num_observations = x_train.shape[0]
 num_features = x_train.shape[1]    # + 1 to account for constant # + 1 to account for constant
 
 # define base distribution as standard normal
-scale = torch.ones([num_features]).double()
-base_dist = pyrod.torch.MultivariateNormal(loc=torch.zeros([num_features]).double(), scale_tril=torch.diag(scale))
+scale = torch.ones([num_features])
+base_dist = pyrod.torch.MultivariateNormal(loc=torch.zeros([num_features]), scale_tril=torch.diag(scale))
 
 # define prior as zero mean, with variance
 prior_var = 100
@@ -58,16 +64,16 @@ def log_l(sample):
 
     repeat_number = sample.shape[0]
     Y = np.array([y_train for _ in range(repeat_number)]).transpose()
-    Y = torch.tensor(Y.transpose()).double()
+    Y = torch.tensor(Y).double()
 
     log_like_terms = -Y * theta_1 + (Y - 1) * theta_2
-    return log_like_terms.sum()
+    return torch.sum(log_like_terms, 0)
 
 
 # Un-normalized target density (whitened)
 def unnormalized_log_prob(samples):
     result = base_dist.log_prob(samples)
-    for sample in samples:
+    for sample in [samples]:
          result += log_l(sample*prior_std)
     return result
 
@@ -79,7 +85,7 @@ depth = 2
 
 # training hyper-parameters
 sample_size = 100
-num_iters = 20000
+num_iters = 60 #20000
 optimizer = torch.optim.Adam
 
 # example to run
@@ -136,6 +142,7 @@ if example == 2:
 
         # form lazy map
         new_bij = lm.make_lazy_bij(iaf_bij, num_features, dim)
+        target_log_prob = unnormalized_log_prob
 
         bij, step_record_layer, time_record_layer, loss_record_layer = lm.update_lazy_layer(bij,
                                                                                             new_bij,
