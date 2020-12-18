@@ -3,6 +3,7 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 import matplotlib.pyplot as plt
 import time
+import torch
 
 tfd = tfp.distributions
 tfb = tfp.bijectors
@@ -36,8 +37,9 @@ def compute_h_diagnostic_tlp(base_dist, bijector, target_log_prob, sample_size):
     y_grad_holder = []
     y_holder = []
     # compute y = gradient log(\pi/\rho) for each sample
-    for _ in range(sample_size):
+    for i in range(sample_size):
         x = base_dist.sample()
+        #x = tf.convert_to_tensor(np.load("x.npy"))
         x = tf.reshape(x, [1, dim])
         with tf.GradientTape(persistent=True) as tape:
             tape.watch(x)
@@ -50,6 +52,7 @@ def compute_h_diagnostic_tlp(base_dist, bijector, target_log_prob, sample_size):
         y_grad_holder.append(y_grad)
         y_holder.append(y.numpy())
 
+    #print(y_grad_holder)
     y_np = np.array(y_holder).flatten()
     weights = np.exp(y_np - np.max(y_np))
     sum_weights = np.sum(weights)
@@ -71,7 +74,12 @@ def compute_elbo_tlp(base_dist, bijector, target_log_prob, sample_size):
 
     # Draw samples and transform them
     samples = base_dist.sample(sample_size)
+    #samples = torch.load("../samples.pt").double()
+    #samples = samples.numpy()
+    samples = tf.convert_to_tensor(samples)
+    #print("Samples", samples)
     t_x = bijector(samples)  # forward map of S.N. samples
+    #print("forward map", t_x)
 
     # Log density term
     log_prob_term = target_log_prob(t_x)
@@ -269,7 +277,7 @@ def update_lazy_layer(bij, new_bij, base_dist, target_log_prob, optimizer, num_i
     return lazy_bij, step_record_layer, time_record_layer, loss_record_layer
 
 
-# ============== Newer funtions above ==============
+# ============== Newer functions above ==============
 
 
 

@@ -16,9 +16,8 @@ tfd = tfp.distributions
 tfb = tfp.bijectors
 tf_double = tf.float64
 
-
 # import data
-train = pd.read_csv("paper_examples/pd_speech_features.csv")
+train = pd.read_csv("../paper_examples/pd_speech_features.csv")
 
 # set up data set
 
@@ -80,7 +79,7 @@ depth = 2
 
 # training hyper-parameters
 sample_size = 100
-num_iters = 500 #20000
+num_iters = 300 #20000
 optimizer = tf.optimizers.Adam(1e-3)
 
 # example to run

@@ -8,7 +8,7 @@ pyrod = pyro.distributions
 pyd = torch.distributions
 pytd = pyd.transformed_distribution
 
-DTYPE = torch.float32
+DTYPE = torch.float32 # pytorch operates internally in float32
 
 
 # diagnostic functions to measure distance/divergence from the posterior to the variational approximation
@@ -39,28 +39,23 @@ def compute_h_diagnostic_tlp(base_dist, bijector, target_log_prob, sample_size):
     # compute y = gradient log(\pi/\rho) for each sample
     for i in range(sample_size):
         x = base_dist.sample()
+        #x = torch.tensor(np.load("x.npy")).float()
         x = torch.reshape(x, [1, dim])
         x.requires_grad_(True)
 
         t_x = bijector(x)  # forward map of S.N. samples
         log_target_prob_term = target_log_prob(t_x)
         y = log_target_prob_term + bijector.log_abs_det_jacobian(x) - base_dist.log_prob(x) #x, event_ndims=1
-        y.backward(torch.ones(1))
+        y.backward() #torch.ones(1))
 
-        y_grad = x.grad
-        # with tf.GradientTape(persistent=True) as tape:
-        #     tape.watch(x)
-        #     t_x = bijector(x)  # forward map of S.N. samples
-        #     log_target_prob_term = target_log_prob(t_x)
-        #     y = log_target_prob_term + bijector.log_abs_det_jacobian(x, event_ndims=1) \
-        #         - base_dist.log_prob(x)
-
-        # y_grad = tape.gradient(y, x).numpy()
-        y_grad_holder.append(y_grad)
+        y_grad_holder.append(x.grad) #x.grad is the gradient of y with respect to x
+        #if i<2:
+        #    print("targetprobterm", log_target_prob_term)
+        #    print("y", y)
         y_holder.append(y.detach().numpy())
 
-        if i%100==0:
-            print("Step {i}: {time}".format(i=i, time=time.time()-prev_time))
+        if i%250==0:
+            print("Step {i}, Time: {time}".format(i=i, time=time.time()-prev_time))
             prev_time = time.time()
 
     y_np = np.array(y_holder).flatten()
@@ -83,7 +78,10 @@ def compute_elbo_tlp(base_dist, bijector, target_log_prob, sample_size):
 
     # Draw samples and transform them
     samples = base_dist.sample(torch.Size([sample_size])).float()
+    #samples = torch.load("../samples.pt")
+    #print("Samples", samples)
     t_x = bijector(samples)  # forward map of S.N. samples
+    #print("forward map", t_x)
 
     # Log density term
     log_prob_term = target_log_prob(t_x)
@@ -115,6 +113,7 @@ def compute_var_diagnostic_tlp(base_dist, bijector, target_log_prob, sample_size
     objective = log_prob_term + jacobian_term - base_dist.log_prob(samples)
     return 0.5 * torch.var(objective)
 
+
 '''
 class LinearOperatorWithDetOne():
     """LinearOperator for rotations (U such that U U^T = U^T U = Id)"""
@@ -140,10 +139,15 @@ class LinearOperatorWithDetOne(LinearOperator):
     """tf LinearOperator for rotations (U such that U U^T = U^T U = Id)"""
     def __init__(self, mat):
         super().__init__(shape=mat.shape, dtype=np.float32)
-        self.scale = torch.from_numpy(np.flip(mat, axis=0).copy()).float()
+        #self.scale = torch.from_numpy(np.flip(mat, axis=0).copy()).float()
+        self.scale = torch.from_numpy(mat.copy()).float()
 
     def _matmat(self, X):
-        return torch.matmul(X, self.scale) #self.scale, torch.transpose(X, 0, 1))
+        if self.scale.shape[1]==X.shape[0]:
+            return torch.matmul(self.scale, X) #self.scale, torch.transpose(X, 0, 1))
+        else:
+            expanded = torch.unsqueeze(X, -1)
+            return torch.squeeze(torch.matmul(self.scale, expanded), -1)
 
     def determinant(self):
         return torch.tensor(1).double()
@@ -221,23 +225,9 @@ class Blockwise(pyrod.torch_transform.TransformModule):
         return self.trainable_variables
 
     def log_abs_det_jacobian(self, x):
-        '''ldj_sum = torch.zeros([], dtype=DTYPE)
-
-                def step(bij, x):
-                    nonlocal ldj_sum
-                    # Compute the LDJ for this step, and add it to the rolling sum.
-                    component_ldj = torch.tensor(bij.log_abs_det_jacobian(x))
-
-                    ldj_sum = ldj_sum + component_ldj
-                    y = bij(x)
-                    return y
-
-                step(self, x)
-                return torch.nn.Identity(ldj_sum)'''
-
         x1, x2 = torch.split(x, self.dims, dim=1)
         ldj_1 = self.bij1.log_abs_det_jacobian(x1)
-        ldj_2 = self.bij2.log_abs_det_jacobian(x1)
+        ldj_2 = self.bij2.log_abs_det_jacobian(x2)
         return ldj_1+ldj_2
 
 
@@ -257,13 +247,14 @@ class ComposeTransformWithJacobian(pyrod.torch_transform.ComposeTransformModule)
             return torch.zeros_like(x)
         result = 0
         for part in self.parts[:-1]:
-            y_tmp = part(x)
-            result = result + _sum_rightmost(part.log_abs_det_jacobian(x),
-                                             self.event_dim - part.event_dim)
-            x = y_tmp
+            #result = result + _sum_rightmost(part.log_abs_det_jacobian(x),
+            #                                 self.event_dim - part.event_dim)
+            result = result + part.log_abs_det_jacobian(x)
+            x = part(x)
         part = self.parts[-1]
-        result = result + _sum_rightmost(part.log_abs_det_jacobian(x),
-                                         self.event_dim - part.event_dim)
+        #result = result + _sum_rightmost(part.log_abs_det_jacobian(x),
+        #                                 self.event_dim - part.event_dim)
+        result = result + part.log_abs_det_jacobian(x)
         return result
 
 
@@ -272,9 +263,27 @@ class AffineFlowWithInverse(pyrod.transforms.AffineAutoregressive):
         super().__init__(input)
 
     def log_abs_det_jacobian(self, x):
-        _, logit_scale = self.arn(x)
+        '''_, logit_scale = self.arn(x)
         log_scale = self.logsigmoid(logit_scale + self.sigmoid_bias)
-        return log_scale[:, 1] #log_scale.sum(-1)
+        return log_scale[:, 1] #log_scale.sum(-1)'''
+        #return super().log_abs_det_jacobian(x, self.arn(x))
+
+        from pyro.distributions.transforms.utils import clamp_preserve_gradients
+        x_old, y_old = self._cached_x_y
+        if x is not x_old:
+            # This call to the parent class Transform will update the cache
+            # as well as calling self._call and recalculating y and log_detJ
+            self(x)
+
+        if self._cached_log_scale is not None:
+            log_scale = self._cached_log_scale
+        elif not self.stable:
+            _, log_scale = self.arn(x)
+            log_scale = clamp_preserve_gradients(log_scale, self.log_scale_min_clip, self.log_scale_max_clip)
+        else:
+            _, logit_scale = self.arn(x)
+            log_scale = self.logsigmoid(logit_scale + self.sigmoid_bias)
+        return log_scale.sum(-1)
 
     def inverse_log_abs_det_jacobian(self, y):
         return -self.log_abs_det_jacobian(self._inverse(y))
@@ -331,9 +340,10 @@ class Invert(pyrod.torch_transform.TransformModule):
         self.trainable_variables.update(self.bijector.get_trainable_variables())
         return self.trainable_variables
 
+
 def make_shift_bij(dim):
     """forms a trainable shift bijector [x -> x + shift]"""
-    shift = torch.zeros(dim, dtype=DTYPE, requires_grad=True)
+    shift = torch.zeros(dim, dtype=DTYPE)
     return LinearOperatorShift(shift=shift)
 
 
@@ -342,9 +352,9 @@ def make_diag_scale_bij(dim):
     # initialize
     w = torch.empty(dim)
     scale_init = torch.nn.init.xavier_uniform(w)
-    scale_init.requires_grad_()
+    #scale_init.requires_grad_()
 
-    # build linear operator and reutrn bijector
+    # build linear operator and return bijector
     scale_lin_oper = torch.diag(scale_init)
     return LinearOperatorScale(scale=scale_lin_oper)
 
@@ -363,7 +373,7 @@ def make_lower_tri_scale_bij(dim):
 
     # build linear operator and return bijector
     input_mat = torch.as_tensor(scale_init)
-    input_mat.requires_grad_()
+    #input_mat.requires_grad_()
     # input_mat = torch.autograd.Variable(scale_init, name='lower_tri_scale')
     scale_lin_oper = torch.tril(input_mat)
     return LinearOperatorScale(scale=scale_lin_oper)
@@ -374,16 +384,6 @@ def make_rotation_bij(U):
     operator = LinearOperatorWithDetOne(U)
     return LinearOperatorScale(scale=operator)
 
-
-'''def make_iaf_bij(dim, num_stages, width, depth):
-    perm = [i for i in range(dim)]
-    perm = torch.tensor(perm[::-1]).double()
-    hidden_dim = list(np.repeat(width, depth))
-
-    iaf_bij = iaf.InverseAutoregressiveFlow(dim, hidden_dim, permutation=perm)
-    print("come back to line 223 in make_iaf_bij")
-    iaf_bij(torch.zeros((dim,)).double())
-    return iaf_bij'''
 
 def make_iaf_bij(dim, num_stages, width, depth):
     """forms a trainable iaf bijector [x -> iaf(x)]"""
@@ -398,11 +398,9 @@ def make_iaf_bij(dim, num_stages, width, depth):
                                         param_dims=[1, 1],
                                         nonlinearity=torch.nn.ELU())
 
-        bijectors.append(Invert(AffineFlowWithInverse(made)))
-        #bijectors.append(pyrod.transforms.AffineAutoregressive(made).inv)
+        bijectors.append(AffineFlowWithInverse(made))#Invert(AffineFlowWithInverse(made)))
 
     iaf_bij = ComposeTransformWithJacobian(list(reversed(bijectors)))
-    #iaf_bij.float()
     iaf_bij(torch.zeros((dim,)).float())
     return iaf_bij
 
@@ -410,7 +408,6 @@ def make_iaf_bij(dim, num_stages, width, depth):
 def make_lazy_bij(bij, full_dim, active_dim):
     """returns a lazy bijector [bij(active_dim) -> lazy_bij(full_dim) = [bij(active_dim) ; id(lazy_dim)]"""
     lazy_dim = full_dim - active_dim
-    # return tfb.Blockwise([bij, torch.nn.Identity()], [active_dim, lazy_dim])
     return Blockwise(bij, Identity(), [active_dim, lazy_dim])
     # when you call blockwise.forward, it splits the inputs (torch.split) and applying the two passed in bijectors
 
@@ -437,22 +434,21 @@ def train(base_dist, bijector, training_vars, target_log_prob, optimizer, num_it
         return compute_elbo_tlp(base_dist, bijector, target_log_prob, sample_size)
 
     for i in range(num_iters):
-        loss = loss_fn(base_dist, bijector, target_log_prob, sample_size)
         opt.zero_grad()
+        loss = loss_fn(base_dist, bijector, target_log_prob, sample_size)
         loss.backward()
         opt.step()
 
-        # optimizer.minimize(loss=loss, var_list=training_vars)
-
         if i % 10 == 0:
             step_record.append(i)
-            loss_record.append(loss.detach().numpy())
+            loss_record.append(loss.item())
             time_record.append(time.time() - t_start)
 
             update_str = 'Step: ' + str(step_record[-1]) + \
                          ' time(s): ' + str(time_record[-1]) + \
                          ' loss: ' + str(loss_record[-1])
             print(update_str)
+        #break
 
     t_end = time.time()
 
@@ -468,12 +464,10 @@ def update_lazy_layer(bij, new_bij, base_dist, target_log_prob, optimizer, num_i
     bij = \mathfrak{T}_k, new_bij = T_{k+1}, lazy_bij = \mathfrak{T}_{k+1} = \mathfrak{T}_k o T_{k+1}
     """
 
-    print("computing h diagnostic")
+    print("Computing H diagnostic")
 
     h_is_new, h_q0_new = compute_h_diagnostic_tlp(base_dist, bij, target_log_prob, 1000)
     vals_new, vecs_new = np.linalg.eigh(h_q0_new)
-
-    print("finished computing h diagnostic")
 
     vecs_new = vecs_new[:, ::-1]
     rotation_bij = make_rotation_bij(vecs_new)
@@ -481,7 +475,7 @@ def update_lazy_layer(bij, new_bij, base_dist, target_log_prob, optimizer, num_i
     bijs = [bij, rotation_bij, new_bij]
     lazy_bij = ComposeTransformWithJacobian(bijs)
 
-    print("beginning training")
+    print("Beginning training")
 
     step_record_layer, time_record_layer, loss_record_layer = train(base_dist,
                                                                     lazy_bij,
