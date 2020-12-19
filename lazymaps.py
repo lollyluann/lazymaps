@@ -133,12 +133,10 @@ class LinearOperatorWithDetOne(tf.linalg.LinearOperatorFullMatrix):
         return self.adjoint()
 
 
-
 def make_shift_bij(dim):
     """forms a trainable shift bijector [x -> x + shift]"""
     shift = tf.Variable(tf.zeros(dim, DTYPE), name='shift')
     return tfb.Shift(shift=shift)
-
 
 
 def make_diag_scale_bij(dim):
@@ -150,7 +148,6 @@ def make_diag_scale_bij(dim):
     # build linear operator and reutrn bijector
     scale_lin_oper = tf.linalg.LinearOperatorDiag(tf.Variable(scale_init, name='diag_scale'))
     return tfb.ScaleMatvecLinearOperator(scale_lin_oper)
-
 
 
 def make_lower_tri_scale_bij(dim):
@@ -170,19 +167,17 @@ def make_lower_tri_scale_bij(dim):
     return tfb.ScaleMatvecLinearOperator(scale_lin_oper)
 
 
-
 def make_rotation_bij(U):
     """forms a constant rotation bijector from U [x -> Ux: U such that U U^T = U^T U = Id]"""
     operator = LinearOperatorWithDetOne(U)
     return tfb.ScaleMatvecLinearOperator(scale=operator)
 
 
-
 def make_iaf_bij(dim, num_stages, width, depth):
     """forms a trainable iaf bijector [x -> iaf(x)]"""
     bijectors = []
     perm = [i for i in range(dim)]
-    perm = perm[::-1]
+    #perm = perm[::-1]
     for i in range(num_stages):
         made = tfb.AutoregressiveNetwork(params=2,
                                          hidden_units=list(np.repeat(width, depth)),
@@ -199,7 +194,6 @@ def make_iaf_bij(dim, num_stages, width, depth):
     iaf_bij = tfb.Chain(list(reversed(bijectors)))
     iaf_bij.forward(tf.zeros((dim,), dtype=DTYPE))
     return iaf_bij
-
 
 
 def make_lazy_bij(bij, full_dim, active_dim):
@@ -268,6 +262,10 @@ def update_lazy_layer(bij, new_bij, base_dist, target_log_prob, optimizer, num_i
     rotation_bij = make_rotation_bij(vecs_new)
 
     lazy_bij = bij(rotation_bij(new_bij))
+
+    #weights = tf.Variable(tf.ones((500, 500), DTYPE))
+
+    #lazy_bij = tfb.ScaleMatvecLinearOperator(LinearOperatorWithDetOne(weights))
 
     step_record_layer, time_record_layer, loss_record_layer = train(base_dist,
                                                                     lazy_bij,

@@ -3,6 +3,7 @@ import torch
 import pyro
 from scipy.sparse.linalg import LinearOperator
 import time
+import iaf
 
 pyrod = pyro.distributions
 pyd = torch.distributions
@@ -405,24 +406,14 @@ def make_rotation_bij(U):
 
 def make_iaf_bij(dim, num_stages, width, depth):
     """forms a trainable iaf bijector [x -> iaf(x)]"""
-    bijectors = []
     hidden_dim = list(np.repeat(width, depth))
     permutation = [i for i in range(dim)]
-    permutation = torch.tensor(permutation).double() # permutation[::-1]
+    permutation = torch.tensor(permutation[::-1]).double()
 
-    for i in range(num_stages):
-        made = pyro.nn.AutoRegressiveNN(dim,
-                                        hidden_dim,
-                                        permutation=permutation,
-                                        param_dims=[1, 1],
-                                        nonlinearity=torch.nn.ELU())
-        bijectors.append(AffineFlowWithInverse(made))#Invert(AffineFlowWithInverse(made)))
-        bijectors.append(Flip(axis=-1))
-
-    iaf_bij = ComposeTransformWithJacobian(list(reversed(bijectors)))
+    iaf_bij = iaf.InverseAutoregressiveFlow(dim, hidden_dim, num_stages, permutation=permutation)
+    print(iaf_bij)
     iaf_bij(torch.zeros((dim,)).float())
     return iaf_bij
-
 
 def make_lazy_bij(bij, full_dim, active_dim):
     """returns a lazy bijector [bij(active_dim) -> lazy_bij(full_dim) = [bij(active_dim) ; id(lazy_dim)]"""
@@ -447,7 +438,6 @@ def train(base_dist, bijector, training_vars, target_log_prob, optimizer, num_it
     time_record = []
     step_record = []
     t_start = time.time()
-    training_vars = training_vars.get_trainable_variables()
     opt = optimizer(list(training_vars), lr=1e-3)
 
     def loss_fn(base_dist, bijector, target_log_prob, sample_size):
@@ -500,11 +490,10 @@ def update_lazy_layer(bij, new_bij, base_dist, target_log_prob, optimizer, num_i
     #lazy_bij = LinearOperatorScale(LinearOperatorWithDetOne(weights))
 
     print("Beginning training")
-    print(len(new_bij.get_trainable_variables()))
 
     step_record_layer, time_record_layer, loss_record_layer = train(base_dist,
                                                                     lazy_bij,
-                                                                    new_bij, #.get_trainable_variables(),
+                                                                    new_bij.get_trainable_variables(),
                                                                     target_log_prob, optimizer, num_iters, sample_size)
 
     return lazy_bij, step_record_layer, time_record_layer, loss_record_layer

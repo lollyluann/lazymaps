@@ -3,6 +3,7 @@ import pandas as pd
 #import matplotlib as mpl
 import numpy as np
 import lazymaps_pyc as lm
+#import lazymaps_pyc_iaf as lm
 from sklearn import preprocessing
 import torch
 import pyro
@@ -84,7 +85,7 @@ depth = 2
 
 # training hyper-parameters
 sample_size = 100
-num_iters = 300 #20000
+num_iters = 600 #20000
 optimizer = torch.optim.Adam
 
 # example to run
@@ -165,8 +166,8 @@ h_is_trace = np.trace(h_is)
 h_q0_trace = np.trace(h_q0)
 print('RAN EXAMPLE: '+str(example))
 print('==DIAGNOSTICS==')
-print('ELBO: ' + str(elbo.item().numpy()))
-print('Var: ' + str(var_diag.item().numpy()))
+print('ELBO: ' + str(elbo.item()))
+print('Var: ' + str(var_diag.item()))
 print('trace (IS): ' + str(h_is_trace))
 print('trace (q0): ' + str(h_q0_trace))
 print("Total time:", time.time()-st)
