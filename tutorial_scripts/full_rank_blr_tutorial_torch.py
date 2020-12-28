@@ -2,7 +2,7 @@ import pandas as pd
 #import matplotlib.pyplot as plt
 #import matplotlib as mpl
 import numpy as np
-import lazymaps_pyc as lm
+import lazymaps_pyc2 as lm
 #import lazymaps_pyc_iaf as lm
 from sklearn import preprocessing
 import torch
@@ -85,7 +85,7 @@ depth = 2
 
 # training hyper-parameters
 sample_size = 100
-num_iters = 600 #20000
+num_iters = 5000 #20000
 optimizer = torch.optim.Adam
 
 # example to run

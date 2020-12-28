@@ -43,7 +43,7 @@ def compute_h_diagnostic_tlp(base_dist, bijector, target_log_prob, sample_size):
         x = torch.reshape(x, [1, dim])
         x.requires_grad_(True)
 
-        #bijector.event_dim = 1
+        bijector.event_dim = 1
         t_x = bijector(x)  # forward map of S.N. samples
         log_target_prob_term = target_log_prob(t_x)
         y = log_target_prob_term + bijector.log_abs_det_jacobian(x, t_x) - base_dist.log_prob(x) #x, event_ndims=1
@@ -78,7 +78,7 @@ def compute_elbo_tlp(base_dist, bijector, target_log_prob, sample_size):
     samples = base_dist.sample(torch.Size([sample_size])).float()
     #samples = torch.load("../samples.pt")
     #print("Samples", samples)
-    #bijector.event_dim = 1
+    bijector.event_dim = 1
     t_x = bijector(samples)  # forward map of S.N. samples
     #print("forward map", t_x)
 
@@ -86,7 +86,6 @@ def compute_elbo_tlp(base_dist, bijector, target_log_prob, sample_size):
     log_prob_term = target_log_prob(t_x)
 
     # Jacobian term
-    #print("EVENT DIM", bijector.event_dim)
     jacobian_term = bijector.log_abs_det_jacobian(samples, t_x)
 
     # Add up all terms:
@@ -120,17 +119,14 @@ class LinearOperatorWithDetOne():
     def __init__(self, U):
         super().__init__()
         self.scale = torch.tensor(self.compute_scale(U)).double()
-
     # given U and you want V=SU such that VV' = V'V = I
     def compute_scale(self, U):
         eigenval, eigenvec = np.linalg.eig(U@np.transpose(U))
         div = 1 / np.sqrt(eigenval)
         scale = np.diag(div)
         return scale @ np.linalg.inv(eigenvec)
-
     def determinant(self):
         return torch.tensor(1).double()
-
     def log_abs_det_jacobian(self):
         return torch.tensor(0).double()
 '''
@@ -270,14 +266,12 @@ class AffineFlowWithInverse(pyrod.transforms.AffineAutoregressive):
         #log_scale = self.logsigmoid(logit_scale + self.sigmoid_bias)
         #return log_scale[:, 1] #log_scale.sum(-1)
         #return super().log_abs_det_jacobian(x, self.arn(x))
-
         from pyro.distributions.transforms.utils import clamp_preserve_gradients
         x_old, y_old = self._cached_x_y
         if x is not x_old:
             # This call to the parent class Transform will update the cache
             # as well as calling self._call and recalculating y and log_detJ
             self(x)
-
         if self._cached_log_scale is not None:
             log_scale = self._cached_log_scale
         elif not self.stable:
@@ -408,7 +402,7 @@ def make_iaf_bij(dim, num_stages, width, depth):
     bijectors = []
     hidden_dim = list(np.repeat(width, depth))
     permutation = [i for i in range(dim)]
-    permutation = torch.tensor(permutation).double() # permutation[::-1]
+    permutation = torch.tensor(permutation[::-1])
 
     for i in range(num_stages):
         made = pyro.nn.AutoRegressiveNN(dim,
@@ -427,13 +421,15 @@ def make_iaf_bij(dim, num_stages, width, depth):
 def make_lazy_bij(bij, full_dim, active_dim):
     """returns a lazy bijector [bij(active_dim) -> lazy_bij(full_dim) = [bij(active_dim) ; id(lazy_dim)]"""
     lazy_dim = full_dim - active_dim
-    return Blockwise(bij, Identity(), [active_dim, lazy_dim])
+    tmp_bij = Blockwise(bij, Identity(), [active_dim, lazy_dim])
+    #tmp_bij.event_dim = 1
+    return tmp_bij
+
     # when you call blockwise.forward, it splits the inputs (torch.split) and applying the two passed in bijectors
 
 
 def train(base_dist, bijector, training_vars, target_log_prob, optimizer, num_iters, sample_size):
     """trains training_vars to minimize negative ELBO between base_dist and the pull-back bijector^# target
-
     Arguments:
         base_dist:          Starting distribution to be pushed forward to the target [\rho in \pi \approx bij_# \rho]
         bijector:           bijector defining the variational approximation to the target through (bij above)
@@ -447,7 +443,8 @@ def train(base_dist, bijector, training_vars, target_log_prob, optimizer, num_it
     time_record = []
     step_record = []
     t_start = time.time()
-    opt = optimizer(list(training_vars), lr=1e-2)
+    training_vars = training_vars.get_trainable_variables()
+    opt = optimizer(list(training_vars), lr=1e-4)
 
     def loss_fn(base_dist, bijector, target_log_prob, sample_size):
         return compute_elbo_tlp(base_dist, bijector, target_log_prob, sample_size)
@@ -457,8 +454,6 @@ def train(base_dist, bijector, training_vars, target_log_prob, optimizer, num_it
         loss = loss_fn(base_dist, bijector, target_log_prob, sample_size)
         loss.backward()
         opt.step()
-        #print("ITERATION", i, ": ", list(bijector[2].bij1[1].arn.parameters())[0].grad)
-        #print("ITERATION", i, ": ", list(bijector[2].bij1[1].arn.parameters())[0])
 
         if i % 10 == 0:
             step_record.append(i)
@@ -469,6 +464,7 @@ def train(base_dist, bijector, training_vars, target_log_prob, optimizer, num_it
                          ' time(s): ' + str(time_record[-1]) + \
                          ' loss: ' + str(loss_record[-1])
             print(update_str)
+        #break
 
     t_end = time.time()
 
@@ -480,7 +476,6 @@ def train(base_dist, bijector, training_vars, target_log_prob, optimizer, num_it
 def update_lazy_layer(bij, new_bij, base_dist, target_log_prob, optimizer, num_iters, sample_size):
     """Adds a lazy layer to bij
     In notation of https://arxiv.org/pdf/1906.00031.pdf
-
     bij = \mathfrak{T}_k, new_bij = T_{k+1}, lazy_bij = \mathfrak{T}_{k+1} = \mathfrak{T}_k o T_{k+1}
     """
 
@@ -492,21 +487,19 @@ def update_lazy_layer(bij, new_bij, base_dist, target_log_prob, optimizer, num_i
     vecs_new = vecs_new[:, ::-1]
     rotation_bij = make_rotation_bij(vecs_new)
 
-    bijs = [bij, rotation_bij, new_bij]
+    bijs = [bij, new_bij] #rotation_bij, new_bij]
     lazy_bij = ComposeTransformWithJacobian(bijs)
 
     #weights = torch.ones((500,500), requires_grad=True)
 
-    #linear_bij = LinearOperatorScale(LinearOperatorWithDetOne(weights))
-
-    #lazy_bij = ComposeTransformWithJacobian([bij, rotation_bij, linear_bij])
+    #lazy_bij = LinearOperatorScale(LinearOperatorWithDetOne(weights))
 
     print("Beginning training")
     print(len(new_bij.get_trainable_variables()))
 
     step_record_layer, time_record_layer, loss_record_layer = train(base_dist,
                                                                     lazy_bij,
-                                                                    lazy_bij.get_trainable_variables(),
+                                                                    new_bij, #.get_trainable_variables(),
                                                                     target_log_prob, optimizer, num_iters, sample_size)
 
     return lazy_bij, step_record_layer, time_record_layer, loss_record_layer

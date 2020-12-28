@@ -79,7 +79,7 @@ depth = 2
 
 # training hyper-parameters
 sample_size = 100
-num_iters = 300 #20000
+num_iters = 5000 #20000
 optimizer = tf.optimizers.Adam(1e-3)
 
 # example to run

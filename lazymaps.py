@@ -46,7 +46,7 @@ def compute_h_diagnostic_tlp(base_dist, bijector, target_log_prob, sample_size):
             t_x = bijector(x)  # forward map of S.N. samples
             log_target_prob_term = target_log_prob(t_x)
             y = log_target_prob_term + bijector.forward_log_det_jacobian(x, event_ndims=1) \
-                - base_dist.log_prob(x)
+                #- base_dist.log_prob(x)
 
         y_grad = tape.gradient(y, x).numpy()
         y_grad_holder.append(y_grad)
@@ -76,7 +76,7 @@ def compute_elbo_tlp(base_dist, bijector, target_log_prob, sample_size):
     samples = base_dist.sample(sample_size)
     #samples = torch.load("../samples.pt").double()
     #samples = samples.numpy()
-    samples = tf.convert_to_tensor(samples)
+    #samples = tf.convert_to_tensor(samples)
     #print("Samples", samples)
     t_x = bijector(samples)  # forward map of S.N. samples
     #print("forward map", t_x)
@@ -177,7 +177,7 @@ def make_iaf_bij(dim, num_stages, width, depth):
     """forms a trainable iaf bijector [x -> iaf(x)]"""
     bijectors = []
     perm = [i for i in range(dim)]
-    #perm = perm[::-1]
+    perm = perm[::-1]
     for i in range(num_stages):
         made = tfb.AutoregressiveNetwork(params=2,
                                          hidden_units=list(np.repeat(width, depth)),
@@ -265,7 +265,8 @@ def update_lazy_layer(bij, new_bij, base_dist, target_log_prob, optimizer, num_i
 
     #weights = tf.Variable(tf.ones((500, 500), DTYPE))
 
-    #lazy_bij = tfb.ScaleMatvecLinearOperator(LinearOperatorWithDetOne(weights))
+    #linear_bij = tfb.ScaleMatvecLinearOperator(LinearOperatorWithDetOne(weights))
+    #lazy_bij = bij(rotation_bij(linear_bij))
 
     step_record_layer, time_record_layer, loss_record_layer = train(base_dist,
                                                                     lazy_bij,
